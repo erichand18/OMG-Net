@@ -63,5 +63,74 @@ class Classifier(L.LightningModule):
         return output, batch['coords'], batch['id']
         # return self.all_gather(output), self.all_gather(batch['coords']), self.all_gather(batch['id'])
 
+    def training_step(self, batch, batch_idx):
+        data, target = batch
+        preds = self(data)
+        loss = self.loss_fcn(preds, target)
+        self.log("train_loss", loss, prog_bar=True)
+        return loss
+
+    def validation_step(self, batch, batch_idx):
+        data, target = batch
+        preds = self(data)
+        loss = self.loss_fcn(preds, target)
+        self.log("val_loss", loss, prog_bar=True)
+        return loss
+
+    def test_step(self, batch, batch_idx):
+        data, target = batch
+        preds = self(data)
+        loss = self.loss_fcn(preds, target)
+        self.log("test_loss", loss)
+        return loss
+
+    def configure_optimizers(self):
+        optimizer = torch.optim.AdamW(
+            self.parameters(),
+            lr=self.config['OPTIMIZER']['lr'],
+            eps=self.config['OPTIMIZER']['eps'],
+            weight_decay=self.config['REGULARIZATION']['Weight_Decay']
+        )
+
+        sched_type = self.config['SCHEDULER']['Type']
+
+        if sched_type == "ReduceLROnPlateau":
+            scheduler = {
+                "scheduler": torch.optim.lr_scheduler.ReduceLROnPlateau(
+                    optimizer,
+                    mode='min',
+                    factor=self.config['SCHEDULER'].get('factor', 0.5),
+                    patience=self.config['SCHEDULER'].get('patience', 3),
+                    min_lr=self.config['SCHEDULER'].get('min_lr', 1e-6),
+                    verbose=True
+                ),
+                "monitor": self.config['SCHEDULER'].get('monitor', 'val_loss'),
+            }
+
+        elif sched_type == "CosineAnnealingLR":
+            scheduler = {
+                "scheduler": torch.optim.lr_scheduler.CosineAnnealingLR(
+                    optimizer,
+                    # T_max=10,
+                    T_max=self.config['BASEMODEL']['Max_Epochs'],
+                    eta_min=self.config['SCHEDULER'].get('min_lr', 1e-5)
+                )
+            }
+        elif sched_type == "CosineAnnealingWarmRestarts":
+            scheduler = {
+                "scheduler": torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(
+                    optimizer,
+                    T_0=self.config['SCHEDULER'].get('T_0', 10),
+                    T_mult=self.config['SCHEDULER'].get('T_mult', 2),
+                    eta_min=self.config['SCHEDULER'].get('eta_min', 1e-6)
+                )
+            }
+        else:
+            scheduler = None
+
+        return {
+            "optimizer": optimizer,
+            "lr_scheduler": scheduler
+        } if scheduler else optimizer
 
 

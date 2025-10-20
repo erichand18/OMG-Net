@@ -17,10 +17,10 @@ from Utils import TileOps
 
 ## Globals
 n_gpus      = torch.cuda.device_count()
-devices     = [0,1,2,3]
-num_workers = 20
-n_ensemble  = 5
-
+devices     = [0]
+num_workers = 16
+n_ensemble  = 1
+PROCESSING_CHECKPOINT = None
 def load_config():
     config = {
         'BASEMODEL': {
@@ -33,7 +33,7 @@ def load_config():
             'Vis': [0],
             'Batch_Size_Preprocessing': 128,
             'Batch_Size_Masking': 1,
-            'Batch_Size_Classification': 3000,
+            'Batch_Size_Classification': 256,
             'Prob_Tumour_Tresh': 0.85
         },
         'SAM_MODEL': {
@@ -42,8 +42,20 @@ def load_config():
             'stability_score_thresh': 0.8,
             'box_nms_thresh': 0.1,
             'min_mask_region_area': 36,
-            'max_mask_region_area': 3600
+            'max_mask_region_area': 3600,
+            'Points_Batch_Size': 16
         },
+        'OVERALL': {
+            'Patch_Size': [512, 512],
+            'Tile_Overlap': 0,
+            'Background_Threshold': 0.8,
+            'WSIReader': "cuCIM"
+        },
+        'CLASSIFICATION_MODEL': {
+            'Input_Size': [64, 64],
+            'Num_Classes': 2,
+            'Threshold': 0.5
+        }
     }
     return config
 
@@ -93,9 +105,8 @@ def MaskGeneration(tile_dataset_preprocessing, SAM_CHECKPOINT, config):
     return cropped_masks, centers, indexes
 
 def CellClassification(trainer, tile_dataset_preprocessing, cropped_masks, centers, indexes, CLASSIFY_CHECKPOINT, config):
-    classif_transform = transforms.Compose([transforms.ToTensor(),  
+    classif_transform = transforms.Compose([transforms.ToTensor(),
                                             transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
-                                            transforms.Lambda(lambda x: x.half()),
     ])
     tile_dataset_preprocessing.reset_index(drop=True, inplace=True)
     # Create dataloader
@@ -118,6 +129,34 @@ def CellClassification(trainer, tile_dataset_preprocessing, cropped_masks, cente
     for i in range(n_ensemble):
         model_classifier = Classifier.load_from_checkpoint(CLASSIFY_CHECKPOINT[i])
         model_classifier.eval()
+        with torch.no_grad(), torch.autocast(device_type="cuda", enabled=False):  # disable AMP to avoid numeric skew
+            batch = next(iter(data))        # get one batch from the dataloader
+            # Your inference dataset yields a dict, e.g. {'img': tensor, 'msk': tensor, 'coords': tensor, ...}
+            if isinstance(batch, dict):
+                inputs = batch
+            elif isinstance(batch, (list, tuple)) and isinstance(batch[0], dict):
+                inputs = batch[0]
+            else:
+                raise TypeError(f"Unexpected batch type: {type(batch)}")
+
+            print("batch keys:", list(inputs.keys()))
+            print("batch keys:", inputs.keys())  # if it's a dict, e.g. {'img', 'msk'}
+            for k, v in inputs.items():
+                print(k, v.shape, v.dtype)
+
+            with torch.no_grad():
+                device = next(model_classifier.parameters()).device
+                for k, v in inputs.items():
+                    if torch.is_tensor(v):
+                        inputs[k] = v.to(device)
+                        if v.dtype == torch.float16:  # ensure same precision as model weights
+                            inputs[k] = inputs[k].float()
+
+                logits = model_classifier(inputs)
+                probs = torch.softmax(logits, dim=1)
+                print("sample logits:", logits[:5].cpu().numpy())
+                print("sample probs:", probs[:5].cpu().numpy())
+
         model_classifier = freeze_model(model_classifier)
 
         predictions                     = trainer.predict(model_classifier, data)
@@ -139,7 +178,7 @@ def CellClassification(trainer, tile_dataset_preprocessing, cropped_masks, cente
         
     return cell_type_predictions, coords
 
-def complete_inference(config, trainer, local_SVS_PATH, local_result, PROCESSING_CHECKPOINT, SAM_CHECKPOINT, CLASSIFY_CHECKPOINT): 
+def complete_inference(config, trainer, local_SVS_PATH, local_result, PROCESSING_CHECKPOINT, SAM_CHECKPOINT, CLASSIFY_CHECKPOINT):
     try:
         print('1. Remove non-background tiles')
         time_start = time.time()
@@ -220,28 +259,29 @@ if __name__ == "__main__":
 
     config          = load_config()
 
-    ## Checkpoints 
-    SAM_CHECKPOINT          = "/path/to/sam_vit_h_4b8939.pth"
-    CLASSIFY_CHECKPOINT     = [
-        "/path/to/MFDetectionV1.ckpt",
-        "/path/to/MFDetectionV2.ckpt",
-        "/path/to/MFDetectionV3.ckpt",
-        "/path/to/MFDetectionV4.ckpt",
-        "/path/to/MFDetectionV5.ckpt",
-                             ]
+    ## Checkpoints
+    SAM_CHECKPOINT          = "/app/weights/sam_vit_h_4b8939.pth"
+    CLASSIFY_CHECKPOINT = ["/checkpoints/epoch=27-val_loss=0.3153_SAM_Classifier.ckpt"]
 
+    ckpt = torch.load(CLASSIFY_CHECKPOINT[0], map_location="cpu")
+    sd = ckpt.get("state_dict", {})
+    first = next(iter(sd.values()))
+    print("keys in ckpt:", ckpt.keys())
+    print("state_dict tensors:", len(sd))
+    print("first tensor mean|std:", float(next(iter(sd.values())).float().abs().mean()), float(next(iter(sd.values())).float().std()))
+    
     local_SVS_PATH  = sys.argv[1]
     local_result    = f"{os.path.basename(local_SVS_PATH)[:-4]}.csv"
 
     L.seed_everything(42, workers=True)
     torch.set_float32_matmul_precision('medium')
-    trainer = L.Trainer(devices=devices,
-                        accelerator="gpu",
-                        strategy="ddp",
-                        logger=False,
-                        precision=config['BASEMODEL']['Precision'],
-                        use_distributed_sampler = False,
-                        benchmark=False,)
+    trainer = L.Trainer(
+        devices=devices,
+        accelerator="gpu",
+        strategy="auto",
+        logger=True,
+        precision="32-true",
+    )
 
     # Run model
     trainer.strategy.barrier() ## Sync everything to make sure the data is correctly downloaded
@@ -253,9 +293,4 @@ if __name__ == "__main__":
                        SAM_CHECKPOINT,
                        CLASSIFY_CHECKPOINT)
 
-    if trainer.is_global_zero:     
-        if signal:   
-            for gpu_id in range(trainer.world_size):
-                os.remove(f"{local_result[:-4]}_{gpu_id}.csv")
-                os.remove(f"{local_result[:-4]}_{gpu_id}.npz")
 

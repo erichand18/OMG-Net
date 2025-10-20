@@ -1,8 +1,8 @@
 import lightning as L
 import torch
 import numpy as np
-from segment_anything_fast import sam_model_fast_registry 
-from segment_anything_fast.utils.amg import (
+from mobile_sam import sam_model_registry as sam_model_fast_registry
+from mobile_sam.utils.amg import (
     build_point_grid,
     MaskData,
     batch_iterator,
@@ -11,10 +11,9 @@ from segment_anything_fast.utils.amg import (
 )
 
 import matplotlib.pyplot as plt
-from segment_anything_fast.utils import amg
+from mobile_sam.utils import amg
 from torchvision.ops.boxes import batched_nms, box_area
-
-from segment_anything_fast.utils.transforms import ResizeLongestSide  ## @@@
+from mobile_sam.utils.transforms import ResizeLongestSide
 import random
 
 import torch
@@ -57,11 +56,31 @@ class MaskGenerator(L.LightningModule):
         #         )
         
     def forward(self, patches):
+        # Convert numpy patch to torch tensor
         input_image_torch = torch.as_tensor(patches[0], device=self.device)
-        input_image_torch = input_image_torch.permute(2, 0, 1).contiguous()[None, :, :, :]
+
+        # --- Normalize shape to [1, 3, H, W] ---
+        if input_image_torch.ndim == 2:                # [H, W]
+            input_image_torch = input_image_torch.unsqueeze(0).unsqueeze(0)  # [1,1,H,W]
+        elif input_image_torch.ndim == 3:
+            # could be H×W×C or C×H×W
+            if input_image_torch.shape[0] in (1,3):    # already [C,H,W]
+                input_image_torch = input_image_torch.unsqueeze(0)
+            else:                                      # [H,W,C]
+                input_image_torch = input_image_torch.permute(2,0,1).unsqueeze(0)
+
+        # grayscale → RGB
+        if input_image_torch.shape[1] == 1:
+            input_image_torch = input_image_torch.repeat(1, 3, 1, 1)
+
+        # ensure float32
+        input_image_torch = input_image_torch.float()
+
+        # --- SAM preprocess + encoder ---
         input_images = self.sam_model.preprocess(input_image_torch)
         self.features = self.sam_model.image_encoder(input_images)
         del input_images
+
         batch_size = self.config["SAM_MODEL"]["Points_Batch_Size"]
         data = MaskData()
         num_pts_found = 0
@@ -257,4 +276,6 @@ class MaskGenerator(L.LightningModule):
         masks = self.identify_nuclei(H)
         centroids = self.compute_centroids(masks)
         return torch.as_tensor(masks), torch.as_tensor(H), torch.as_tensor(centroids)
+
+
 
