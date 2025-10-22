@@ -14,6 +14,7 @@ from PIL import Image
 class Classifier(L.LightningModule):
     def __init__(self, config, label_encoder=None):
         super().__init__()
+        self.val_loss_history = []
         self.config = config
         self.loss_fcn = getattr(torch.nn, self.config["BASEMODEL"]["Loss_Function"])()
         if self.config['BASEMODEL']['Loss_Function'] == 'CrossEntropyLoss':
@@ -57,6 +58,15 @@ class Classifier(L.LightningModule):
         x = self.activation(x)
 
         return x
+    
+    def on_validation_epoch_end(self):
+        # Get the latest logged validation loss (averaged over batches)
+        val_loss = self.trainer.callback_metrics.get("val_loss")
+        if val_loss is not None:
+            val_loss_value = float(val_loss.cpu().item())
+            self.val_loss_history.append(val_loss_value)
+            print(f"\n📊 Epoch {self.current_epoch}: val_loss = {val_loss_value:.3f}")
+            print("Full val_loss history:", [round(v, 3) for v in self.val_loss_history])
 
     def predict_step(self, batch, batch_idx, dataloader_idx=0):
         output = softmax(self(batch), dim=1)
@@ -92,45 +102,36 @@ class Classifier(L.LightningModule):
             weight_decay=self.config['REGULARIZATION']['Weight_Decay']
         )
 
-        sched_type = self.config['SCHEDULER']['Type']
+        # Warmup for first 5 epochs
+        warmup = torch.optim.lr_scheduler.LinearLR(
+            optimizer,
+            start_factor=0.3,   # start at 30% of initial lr
+            total_iters=5       # for 5 epochs
+        )
 
-        if sched_type == "ReduceLROnPlateau":
-            scheduler = {
-                "scheduler": torch.optim.lr_scheduler.ReduceLROnPlateau(
-                    optimizer,
-                    mode='min',
-                    factor=self.config['SCHEDULER'].get('factor', 0.5),
-                    patience=self.config['SCHEDULER'].get('patience', 3),
-                    min_lr=self.config['SCHEDULER'].get('min_lr', 1e-6),
-                    verbose=True
-                ),
-                "monitor": self.config['SCHEDULER'].get('monitor', 'val_loss'),
-            }
+        # Cosine Annealing with Warm Restarts after warmup
+        cosine = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(
+            optimizer,
+            T_0=self.config['SCHEDULER'].get('T_0', 10),
+            T_mult=self.config['SCHEDULER'].get('T_mult', 1),
+            eta_min=self.config['SCHEDULER'].get('eta_min', 1e-6)
+        )
 
-        elif sched_type == "CosineAnnealingLR":
-            scheduler = {
-                "scheduler": torch.optim.lr_scheduler.CosineAnnealingLR(
-                    optimizer,
-                    # T_max=10,
-                    T_max=self.config['BASEMODEL']['Max_Epochs'],
-                    eta_min=self.config['SCHEDULER'].get('min_lr', 1e-5)
-                )
-            }
-        elif sched_type == "CosineAnnealingWarmRestarts":
-            scheduler = {
-                "scheduler": torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(
-                    optimizer,
-                    T_0=self.config['SCHEDULER'].get('T_0', 10),
-                    T_mult=self.config['SCHEDULER'].get('T_mult', 2),
-                    eta_min=self.config['SCHEDULER'].get('eta_min', 1e-6)
-                )
-            }
-        else:
-            scheduler = None
+        # Chain them: warmup first, then cosine restarts
+        scheduler = torch.optim.lr_scheduler.SequentialLR(
+            optimizer,
+            schedulers=[warmup, cosine],
+            milestones=[5]   # switch after 5 warmup epochs
+        )
 
+        # Return both to Lightning
         return {
             "optimizer": optimizer,
-            "lr_scheduler": scheduler
-        } if scheduler else optimizer
+            "lr_scheduler": {
+                "scheduler": scheduler,
+                "interval": "epoch",    # step per epoch
+                "frequency": 1,
+            }
+        }
 
 

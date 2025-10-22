@@ -261,7 +261,7 @@ if __name__ == "__main__":
 
     ## Checkpoints
     SAM_CHECKPOINT          = "/app/weights/sam_vit_h_4b8939.pth"
-    CLASSIFY_CHECKPOINT = ["/checkpoints/epoch=27-val_loss=0.3153_SAM_Classifier.ckpt"]
+    CLASSIFY_CHECKPOINT = ["/checkpoints/epoch=09-val_loss=0.3002_SAM_Classifier.ckpt"]
 
     ckpt = torch.load(CLASSIFY_CHECKPOINT[0], map_location="cpu")
     sd = ckpt.get("state_dict", {})

@@ -44,18 +44,15 @@ def get_callbacks(config):
 def get_transforms(config):
     input_h, input_w = config['DATA']['Input_Size']
 
-    # ✅ Training augmentations (Albumentations)
     augmentation = A.Compose([
         A.HorizontalFlip(p=0.5),
         A.VerticalFlip(p=0.5),
-        A.RandomRotate90(p=0.5),
-        A.ShiftScaleRotate(shift_limit=0.05, scale_limit=0.1, rotate_limit=20, p=0.5),
-        A.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.1, p=0.5),
-        A.GaussianBlur(p=0.1),
-        A.RandomBrightnessContrast(p=0.3),
-        A.Resize(height=input_h, width=input_w),  # ensure fixed size
+        A.Rotate(limit=90, p=0.5),  # cleaner rotation vs. Affine+RandomRotate90
+        A.RandomBrightnessContrast(0.25, 0.25, p=0.6),
+        A.ColorJitter(0.15, 0.15, 0.15, 0.05, p=0.4),
+        A.HueSaturationValue(10, 15, 10, p=0.4),
+        A.GaussianBlur(blur_limit=(3, 5), p=0.05),  # subtle blur only
     ])
-
     # ✅ Validation (no randomness)
     val_augmentation = A.Compose([
         A.Resize(height=input_h, width=input_w),
