@@ -21,7 +21,7 @@ class CBAM(nn.Module):
                                       padding=kernel_size // 2, bias=False)
         self.sigmoid_spatial = nn.Sigmoid()
 
-        # 🔑 Residual gates (start at 0 ⇒ identity)
+        # Residual gates (start at 0 ⇒ identity)
         self.gamma_c = nn.Parameter(torch.zeros(1))
         self.gamma_s = nn.Parameter(torch.zeros(1))
 
