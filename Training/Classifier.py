@@ -32,9 +32,9 @@ def get_callbacks(config):
     lr_monitor = LearningRateMonitor(logging_interval='step')
     checkpoint_callback = ModelCheckpoint(
         dirpath=config['CHECKPOINT']['logger_folder'],
-        filename="{epoch:02d}-{val_loss:.4f}_SAM_Classifier",
-        monitor= config['CHECKPOINT']['Monitor'],
-        mode=config['CHECKPOINT']['Mode'],
+        filename="{epoch:02d}-{val_f1_score:.4f}_SAM_Classifier",
+        monitor="val_f1_score",
+        mode="max",
         save_top_k=config['CHECKPOINT']['save_top_k'],
         save_last=config['CHECKPOINT']['save_last'],
         save_weights_only=True,
@@ -88,7 +88,7 @@ def get_datasets(config):
     df.reset_index(drop=True, inplace=True)
     print(df)
 
-    # df_test = df[df['image_id'].isin(config['DATA']['filenames_test'])].reset_index(drop=True)
+    df_test = df[df['image_id'].isin(config['DATA']['filenames_test'])].reset_index(drop=True)
     df_train_val = df[~df['image_id'].isin(config['DATA']['filenames_test'])].reset_index(drop=True)
 
     filenames = list(df_train_val['image_id'].unique())
@@ -104,10 +104,10 @@ def get_datasets(config):
                                                               list(df_train['class'].value_counts(normalize=True))[0]))
     print('Validation Size: {}/{}({}) Positive Rate: {}'.format(len(df_val), len(df), len(df_val) / len(df),
                                                                 list(df_val['class'].value_counts(normalize=True))[0]))
-    # print('Testing Size: {}/{}({}) Positive Rate: {}'.format(len(df_test), len(df), len(df_test) / len(df),
-    #                                                          list(df_test['class'].value_counts(normalize=True))[0]))
+    print('Testing Size: {}/{}({}) Positive Rate: {}'.format(len(df_test), len(df), len(df_test) / len(df),
+                                                             list(df_test['class'].value_counts(normalize=True))[0]))
 
-    return df_train, df_val, None
+    return df_train, df_val, df_test
 
 
 def main(config_file):
@@ -122,7 +122,7 @@ def main(config_file):
 
     data = DataModule(df_train = masks_dataset_train,
                       df_val = masks_dataset_val,
-                    #   df_test = masks_dataset_test,
+                      df_test = masks_dataset_test,
                       config = config,
                       train_normalization=train_normalization,
                       val_normalization=val_normalization,
@@ -149,7 +149,7 @@ def main(config_file):
                         )
 
     trainer.fit(model,data)
-    # trainer.test(ckpt_path='best', dataloaders=data.test_dataloader())
+    trainer.test(ckpt_path='best', dataloaders=data.test_dataloader())
 
 if __name__ == "__main__":
     main(sys.argv[1])

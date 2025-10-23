@@ -15,6 +15,10 @@ class Classifier(L.LightningModule):
     def __init__(self, config, label_encoder=None):
         super().__init__()
         self.val_loss_history = []
+        self.val_preds = []
+        self.val_targets = []
+        self.test_preds = []
+        self.test_targets = []
         self.config = config
         self.loss_fcn = getattr(torch.nn, self.config["BASEMODEL"]["Loss_Function"])()
         if self.config['BASEMODEL']['Loss_Function'] == 'CrossEntropyLoss':
@@ -59,14 +63,35 @@ class Classifier(L.LightningModule):
 
         return x
     
+    def on_validation_epoch_start(self):
+        self.val_preds = []
+        self.val_targets = []
+
     def on_validation_epoch_end(self):
-        # Get the latest logged validation loss (averaged over batches)
+        if self.val_preds and self.val_targets:
+            preds = torch.cat(self.val_preds)
+            targets = torch.cat(self.val_targets)
+            val_f1 = f1_score(preds, targets, task="binary")
+            self.log("val_f1_score", val_f1, prog_bar=True)
+
         val_loss = self.trainer.callback_metrics.get("val_loss")
         if val_loss is not None:
             val_loss_value = float(val_loss.cpu().item())
             self.val_loss_history.append(val_loss_value)
             print(f"\n📊 Epoch {self.current_epoch}: val_loss = {val_loss_value:.3f}")
             print("Full val_loss history:", [round(v, 3) for v in self.val_loss_history])
+
+    def on_test_epoch_start(self):
+        self.test_preds = []
+        self.test_targets = []
+
+    def on_test_epoch_end(self):
+        preds = torch.cat(self.test_preds)
+        targets = torch.cat(self.test_targets)
+        
+        test_f1 = f1_score(preds, targets, task="binary")
+        self.log("test_f1", test_f1, prog_bar=True)
+        print(f"\n🏁 Test F1 Score: {test_f1:.4f}")
 
     def predict_step(self, batch, batch_idx, dataloader_idx=0):
         output = softmax(self(batch), dim=1)
@@ -85,6 +110,10 @@ class Classifier(L.LightningModule):
         preds = self(data)
         loss = self.loss_fcn(preds, target)
         self.log("val_loss", loss, prog_bar=True)
+
+        self.val_preds.append(preds.argmax(dim=-1))
+        self.val_targets.append(target)
+
         return loss
 
     def test_step(self, batch, batch_idx):
@@ -92,6 +121,10 @@ class Classifier(L.LightningModule):
         preds = self(data)
         loss = self.loss_fcn(preds, target)
         self.log("test_loss", loss)
+
+        self.test_preds.append(preds.argmax(dim=-1))
+        self.test_targets.append(target)
+
         return loss
 
     def configure_optimizers(self):

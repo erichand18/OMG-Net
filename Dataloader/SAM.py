@@ -220,12 +220,12 @@ class DataGeneratorAllCell(torch.utils.data.Dataset):
 
 class DataModule(LightningDataModule):
     def __init__(self,
-                 df_train, df_val, config,
+                 df_train, df_val, df_test, config,
                  train_normalization=None,
                  val_normalization=None,
                  augmentation=None,
                  val_augmentation=None,
-                 **kwargs):
+                 inference=False):
 
         super().__init__()
         self.config = config
@@ -235,23 +235,23 @@ class DataModule(LightningDataModule):
         if self.config['BASEMODEL']["Training_Stratgy"] == "AllCells":
             self.train_data = DataGeneratorAllCell(self.config, df_train,
                                                    normalization=train_normalization,
-                                                   augmentation=augmentation, **kwargs)
+                                                   augmentation=augmentation, inference=inference)
             self.val_data = DataGeneratorAllCell(self.config, df_val,
                                                  normalization=val_normalization,
-                                                 augmentation=val_augmentation, **kwargs)
-            # self.test_data = DataGeneratorAllCell(self.config, df_test,
-            #                                       normalization=val_normalization,
-            #                                       augmentation=val_augmentation, **kwargs)
+                                                 augmentation=val_augmentation, inference=inference)
+            self.test_data = DataGeneratorAllCell(self.config, df_test,
+                                                  normalization=val_normalization,
+                                                  augmentation=val_augmentation, inference=inference)
         elif self.config['BASEMODEL']["Training_Stratgy"] == "SelectedCells":
             self.train_data = DataGenerator(self.config, df_train,
                                             normalization=train_normalization,
-                                            augmentation=augmentation, **kwargs)
+                                            augmentation=augmentation, inference=inference)
             self.val_data = DataGenerator(self.config, df_val,
                                           normalization=val_normalization,
-                                          augmentation=val_augmentation, **kwargs)
-            # self.test_data = DataGenerator(self.config, df_test,
-            #                                normalization=val_normalization,
-            #                                augmentation=val_augmentation, **kwargs)
+                                          augmentation=val_augmentation, inference=inference)
+            self.test_data = DataGenerator(self.config, df_test,
+                                           normalization=val_normalization,
+                                           augmentation=val_augmentation, inference=inference)
 
     def train_dataloader(self):
         return DataLoader(self.train_data, batch_size=self.batch_size, shuffle=True, num_workers=self.num_of_worker, pin_memory=False,)
@@ -259,6 +259,6 @@ class DataModule(LightningDataModule):
     def val_dataloader(self):
         return DataLoader(self.val_data, batch_size=self.batch_size, shuffle=False, num_workers=self.num_of_worker, pin_memory=False,)
 
-    # def test_dataloader(self):
-    #     return DataLoader(self.test_data, batch_size=1, shuffle=False, num_workers=self.num_of_worker, pin_memory=False,)
+    def test_dataloader(self):
+        return DataLoader(self.test_data, batch_size=1, shuffle=False, num_workers=self.num_of_worker, pin_memory=False,)
 
