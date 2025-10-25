@@ -32,8 +32,8 @@ class DataGenerator(torch.utils.data.Dataset):
         super().__init__()
         self.config = config
         self.df = df
-        self.Input_Size = self.config['DATA']['Input_Size']
-        self.Patch_Size = self.config['DATA']['Patch_Size']
+        self.Input_Size = list(self.config['DATA']['Input_Size'])
+        self.Patch_Size = list(self.config['DATA']['Patch_Size'])
         self.normalization = normalization
         self.augmentation = augmentation
         self.inference = inference
@@ -57,24 +57,23 @@ class DataGenerator(torch.utils.data.Dataset):
         msk = np.array(header['mask']>0).astype(np.float32)
         img, msk = downsampling(img, msk, self.config['DATA']['Downscale_Factor'])
         
-        self.Input_Size = [int(value / self.config['DATA']['Downscale_Factor']) for value in
-                           self.config['DATA']['Input_Size']]
-        self.Patch_Size = [int(value / self.config['DATA']['Downscale_Factor']) for value in
-                           self.config['DATA']['Patch_Size']]
+        downscale_factor = self.config['DATA']['Downscale_Factor']
+        input_size_downscaled = [int(value / downscale_factor) for value in self.Input_Size]
+        patch_size_downscaled = [int(value / downscale_factor) for value in self.Patch_Size]
 
-        if self.Input_Size < self.Patch_Size:
+        if input_size_downscaled < patch_size_downscaled:
             bbox = get_bbox_from_mask(msk)
             center = [(bbox[1] + bbox[3]) / 2, (bbox[0] + bbox[2]) / 2]
 
-            center[0] = max(center[0],  self.Input_Size[0]/2)
-            center[0] = min(center[0], self.Patch_Size[0] - self.Input_Size[0]/2)
-            center[1] = max(center[1], self.Input_Size[1]/2)
-            center[1] = min(center[1], self.Patch_Size[1] - self.Input_Size[1]/2)
+            center[0] = max(center[0],  input_size_downscaled[0]/2)
+            center[0] = min(center[0], patch_size_downscaled[0] - input_size_downscaled[0]/2)
+            center[1] = max(center[1], input_size_downscaled[1]/2)
+            center[1] = min(center[1], patch_size_downscaled[1] - input_size_downscaled[1]/2)
 
-            img = img[int(center[0] - self.Input_Size[0]/2): int(center[0] + self.Input_Size[0]/2),
-                  int(center[1] - self.Input_Size[1]/2): int(center[1] + self.Input_Size[1]/2),:]
-            msk = msk[int(center[0] - self.Input_Size[0]/2): int(center[0] + self.Input_Size[0]/2),
-                  int(center[1] - self.Input_Size[1]/2): int(center[1] + self.Input_Size[1]/2)]
+            img = img[int(center[0] - input_size_downscaled[0]/2): int(center[0] + input_size_downscaled[0]/2),
+                  int(center[1] - input_size_downscaled[1]/2): int(center[1] + input_size_downscaled[1]/2),:]
+            msk = msk[int(center[0] - input_size_downscaled[0]/2): int(center[0] + input_size_downscaled[0]/2),
+                  int(center[1] - input_size_downscaled[1]/2): int(center[1] + input_size_downscaled[1]/2)]
 
         if self.augmentation is not None:
             transformed = self.augmentation(image=img, mask=msk)
@@ -116,8 +115,8 @@ class DataGeneratorAllCell(torch.utils.data.Dataset):
                 'diagnosis': 'string',
                 'annotation_label': 'string',
                 'mask': 'double matrix'}
-        self.Input_Size = self.config['DATA']['Input_Size']
-        self.Patch_Size = self.config['DATA']['Patch_Size']
+        self.Input_Size = list(self.config['DATA']['Input_Size'])
+        self.Patch_Size = list(self.config['DATA']['Patch_Size'])
 
     def __len__(self):
         return len(self.df)
@@ -129,18 +128,23 @@ class DataGeneratorAllCell(torch.utils.data.Dataset):
         msk = np.array(masks_file == self.df['mask_id'][id], dtype='float32')
         img, msk = downsampling(img, msk, self.config['DATA']['Downscale_Factor'])
 
-        if self.Input_Size < self.Patch_Size:
+        downscale_factor = self.config['DATA']['Downscale_Factor']
+        input_size_downscaled = [int(value / downscale_factor) for value in self.Input_Size]
+        patch_size_downscaled = [int(value / downscale_factor) for value in self.Patch_Size]
+
+        if input_size_downscaled < patch_size_downscaled:
             bbox = get_bbox_from_mask(msk)
             center = [(bbox[1] + bbox[3]) / 2, (bbox[0] + bbox[2]) / 2]
-            center[0] = max(center[0],  self.Input_Size[0]/2)
-            center[0] = min(center[0], self.Patch_Size[0] - self.Input_Size[0]/2)
-            center[1] = max(center[1], self.Input_Size[1]/2)
-            center[1] = min(center[1], self.Patch_Size[1] - self.Input_Size[1]/2)
+            
+            center[0] = max(center[0],  input_size_downscaled[0]/2)
+            center[0] = min(center[0], patch_size_downscaled[0] - input_size_downscaled[0]/2)
+            center[1] = max(center[1], input_size_downscaled[1]/2)
+            center[1] = min(center[1], patch_size_downscaled[1] - input_size_downscaled[1]/2)
 
-            img = img[int(center[0] - self.Input_Size[0]/2): int(center[0] + self.Input_Size[0]/2),
-                  int(center[1] - self.Input_Size[1]/2): int(center[1] + self.Input_Size[1]/2),:]
-            msk = msk[int(center[0] - self.Input_Size[0]/2): int(center[0] + self.Input_Size[0]/2),
-                  int(center[1] - self.Input_Size[1]/2): int(center[1] + self.Input_Size[1]/2)]
+            img = img[int(center[0] - input_size_downscaled[0]/2): int(center[0] + input_size_downscaled[0]/2),
+                  int(center[1] - input_size_downscaled[1]/2): int(center[1] + input_size_downscaled[1]/2),:]
+            msk = msk[int(center[0] - input_size_downscaled[0]/2): int(center[0] + input_size_downscaled[0]/2),
+                  int(center[1] - input_size_downscaled[1]/2): int(center[1] + input_size_downscaled[1]/2)]
 
         if self.augmentation is not None:
             transformed = self.augmentation(image=img, mask=msk)
