@@ -103,13 +103,13 @@ def get_callbacks(config, ckpt_dir):
         patience=10,
         min_delta=1e-3,
         verbose=True,
-        stopping_threshold=config['BASEMODEL'].get("F1_Stop_Threshold", 0.9), # Stop if F1 > X
+        stopping_threshold=config['BASEMODEL'].get("F1_Stop_Threshold", 0.9),
         check_on_train_epoch_end=False,
     )
     early_stop_loss = EarlyStopping(
         monitor="val_loss",
         mode="min",
-        patience=15,        # Allow more time for loss to recover
+        patience=15,
         min_delta=1e-4,
         verbose=True,
         check_on_train_epoch_end=False,
@@ -163,11 +163,9 @@ def get_datasets(config):
     df.reset_index(drop=True, inplace=True)
     print(df)
 
-    # --- Correctly isolate the test set ---
     df_test = df[df['image_id'].isin(config['DATA']['filenames_test'])].reset_index(drop=True)
     df_train_val = df[~df['image_id'].isin(config['DATA']['filenames_test'])].reset_index(drop=True)
 
-    # --- Use StratifiedGroupKFold for a robust split ---
     gkf = StratifiedGroupKFold(
         n_splits=int(1 / config['DATA']['val_size']),
         shuffle=True,
@@ -238,7 +236,7 @@ def main(config_file):
 
     trainer.fit(model, data)
 
-    candidate_dirs = {ckpt_dir}  # only this run
+    candidate_dirs = {ckpt_dir}
     patterns = [os.path.join(ckpt_dir, "*.ckpt")]
     ckpt_paths = sorted({p for pat in patterns for p in glob.glob(pat)})
     if not ckpt_paths and getattr(f1_ckpt, "best_model_path", ""):
